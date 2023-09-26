@@ -10,7 +10,14 @@ Future<void> main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   // Always initialize Awesome Notifications
   await NotificationController.initializeLocalNotifications(debug: true);
+
   await NotificationController.initializeRemoteNotifications(debug: true);
+
+  print("*********INITIALIZING FIREBASE MESSAGE TOKEN***********");
+  final firebaseToken = await NotificationController.requestFirebaseToken();
+  print(firebaseToken);
+  print("**********FIREBASE MESSAGE INITIALIZATION TOKEN FETCHED*********");
+
   runApp(const MyApp());
 }
 

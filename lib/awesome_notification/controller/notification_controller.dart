@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:awesome_notification/main.dart';
 import 'package:awesome_notifications/awesome_notifications.dart';
 import 'package:awesome_notifications_fcm/awesome_notifications_fcm.dart';
@@ -13,24 +15,48 @@ class NotificationController {
   static ReceivedAction? initialAction;
 
   /// *********************************************
-  ///   SINGLETON PATTERN
+  ///   INITIALIZATION METHODS
   /// *********************************************
 
-  NotificationController._internal();
+  static Future<void> initializeLocalNotifications(
+      {required bool debug}) async {
+    final buzzerNotificationChannel = NotificationChannel(
+      channelKey: 'buzzer_channel', // id
+      channelName: 'Buzzer', // channel title
+      channelDescription:
+          'This channel is used for notifications Buzzer.', // description
+      channelShowBadge: true,
+      importance: NotificationImportance.High,
+      soundSource: "resource://raw/warning",
+      defaultPrivacy: NotificationPrivacy.Private,
+      defaultColor: Colors.deepPurple,
+      ledColor: Colors.deepPurple,
+    );
 
-  /// *********************************************
-  ///  OBSERVER PATTERN
-  /// *********************************************
+    await AwesomeNotifications().initialize(
+        null, //'resource://drawable/res_app_icon',//
+        [
+          buzzerNotificationChannel,
+          NotificationChannel(
+            channelKey: 'alerts',
+            channelName: 'Alerts',
+            channelDescription: 'Notification tests as alerts',
+            playSound: true,
+            importance: NotificationImportance.High,
+            defaultPrivacy: NotificationPrivacy.Private,
+            defaultColor: Colors.deepPurple,
+            ledColor: Colors.deepPurple,
+          )
+        ],
+        debug: debug);
 
-  static String _firebaseToken = '';
-  String get firebaseToken => _firebaseToken;
-
-  static String _nativeToken = '';
-  String get nativeToken => _nativeToken;
+    // Get initial notification action is optional
+    initialAction = await AwesomeNotifications()
+        .getInitialNotificationAction(removeFromActionEvents: false);
+  }
 
   static Future<void> initializeRemoteNotifications(
       {required bool debug}) async {
-    // await Firebase.initializeApp();
     await AwesomeNotificationsFcm().initialize(
       onFcmSilentDataHandle: NotificationController.mySilentDataHandle,
       onFcmTokenHandle: NotificationController.myFcmTokenHandle,
@@ -62,10 +88,10 @@ class NotificationController {
         .getInitialNotificationAction(removeFromActionEvents: true);
     if (receivedAction == null) return;
 
-    // Fluttertoast.showToast(
-    //     msg: 'Notification action launched app: $receivedAction',
-    //   backgroundColor: Colors.deepPurple
-    // );
+    Fluttertoast.showToast(
+      msg: 'Notification action launched app: $receivedAction',
+      backgroundColor: Colors.deepPurple,
+    );
     print('Notification action launched app: $receivedAction');
   }
 
@@ -77,35 +103,56 @@ class NotificationController {
   /// (even while terminated)
   @pragma("vm:entry-point")
   static Future<void> mySilentDataHandle(FcmSilentData silentData) async {
-    Fluttertoast.showToast(
-        msg: 'Silent data received',
-        backgroundColor: Colors.blueAccent,
-        textColor: Colors.white,
-        fontSize: 16);
-
-    print('"SilentData": ${silentData.toString()}');
-
+    late String serviceType;
     if (silentData.createdLifeCycle != NotificationLifeCycle.Foreground) {
-      print("bg");
+      serviceType = 'BACKGROUND';
     } else {
-      print("FOREGROUND");
+      serviceType = 'FOREGROUND';
     }
 
-    print('mySilentDataHandle received a FcmSilentData execution');
-    await executeLongTaskInBackground();
+    Fluttertoast.showToast(
+      msg: '$serviceType Silent data received',
+      backgroundColor: Colors.blueAccent,
+      textColor: Colors.white,
+      fontSize: 16,
+    );
+
+    if (silentData.data != null) {
+      if (silentData.data!['payload'] != null) {
+        final payloadJson = jsonDecode(silentData.data!['payload']!);
+        if (payloadJson['show_notification'] == '1') {
+          final notificationData = silentData.data!;
+
+          await _showNotification(
+            notificationContent:
+                // notificationContent
+                NotificationContent(
+              id: -1,
+              channelKey: notificationData['android_channel_id'] ?? "alerts",
+              title: notificationData['title'],
+              body: notificationData['body'],
+            ),
+          );
+        }
+      } else {
+        // Your code to handle the notification when 'show_notification' is true
+
+        await executeLongTaskInBackground();
+      }
+    }
   }
 
   /// Use this method to detect when a new fcm token is received
   @pragma("vm:entry-point")
   static Future<void> myFcmTokenHandle(String token) async {
+    print("*******myFcmTokenHandle******");
+    print(token);
     Fluttertoast.showToast(
         msg: 'Fcm token received',
         backgroundColor: Colors.blueAccent,
         textColor: Colors.white,
         fontSize: 16);
     debugPrint('Firebase Token:"$token"');
-
-    _firebaseToken = token;
   }
 
   /// Use this method to detect when a new native token is received
@@ -117,8 +164,6 @@ class NotificationController {
         textColor: Colors.white,
         fontSize: 16);
     debugPrint('Native Token:"$token"');
-
-    _nativeToken = token;
   }
 
   static Future<void> resetBadge() async {
@@ -142,32 +187,6 @@ class NotificationController {
     return '';
   }
 
-  /// *********************************************
-  ///   INITIALIZATION METHODS
-  /// *********************************************
-
-  static Future<void> initializeLocalNotifications(
-      {required bool debug}) async {
-    await AwesomeNotifications().initialize(
-        null, //'resource://drawable/res_app_icon',//
-        [
-          NotificationChannel(
-              channelKey: 'alerts',
-              channelName: 'Alerts',
-              channelDescription: 'Notification tests as alerts',
-              playSound: true,
-              importance: NotificationImportance.High,
-              defaultPrivacy: NotificationPrivacy.Private,
-              defaultColor: Colors.deepPurple,
-              ledColor: Colors.deepPurple)
-        ],
-        debug: debug);
-
-    // Get initial notification action is optional
-    initialAction = await AwesomeNotifications()
-        .getInitialNotificationAction(removeFromActionEvents: false);
-  }
-
   ///  *********************************************
   ///     NOTIFICATION EVENTS LISTENER
   ///  *********************************************
@@ -184,8 +203,17 @@ class NotificationController {
   @pragma('vm:entry-point')
   static Future<void> onActionReceivedMethod(
       ReceivedAction receivedAction) async {
+    print("*******************onActionReceivedMethod**********************");
+    print(receivedAction.toMap());
     if (receivedAction.actionType == ActionType.SilentAction ||
         receivedAction.actionType == ActionType.SilentBackgroundAction) {
+      // if (receivedAction.payload != null &&
+      //     receivedAction.payload!['show_notification'] == "1") {
+      //   print("*******************show_notification**********************");
+
+      //   // Your code to handle the notification when 'show_notification' is true
+      // } else {
+      // }
       // For background actions, you must hold the execution until the end
       print(
           'Message sent via notification input: "${receivedAction.buttonKeyInput}"');
@@ -274,40 +302,58 @@ class NotificationController {
     print("long task done");
   }
 
+  static Future<void> _showNotification({
+    required NotificationContent notificationContent,
+    List<NotificationActionButton>? actionButtons,
+    NotificationSchedule? schedule,
+  }) async {
+    bool isAllowed = await AwesomeNotifications().isNotificationAllowed();
+    if (!isAllowed) isAllowed = await displayNotificationRationale();
+    if (!isAllowed) return;
+    await AwesomeNotifications().createNotification(
+      content: notificationContent,
+      actionButtons: actionButtons,
+      schedule: schedule,
+    );
+  }
+
   ///  *********************************************
   ///     NOTIFICATION CREATION METHODS
   ///  *********************************************
   ///
   static Future<void> createNewNotification() async {
-    bool isAllowed = await AwesomeNotifications().isNotificationAllowed();
-    if (!isAllowed) isAllowed = await displayNotificationRationale();
-    if (!isAllowed) return;
+    final notificationContent = NotificationContent(
+      id: -1, // -1 is replaced by a random number
+      // channelKey: 'alerts',
+      channelKey: 'buzzer_channel',
+      title: 'Huston! The eagle has landed!',
+      body: "A small step for a man, but a giant leap to Flutter's community!",
+      bigPicture:
+          'https://storage.googleapis.com/cms-storage-bucket/d406c736e7c4c57f5f61.png',
+      largeIcon:
+          'https://storage.googleapis.com/cms-storage-bucket/0dbfcc7a59cd1cf16282.png',
+      //'asset://assets/images/balloons-in-sky.jpg',
+      notificationLayout: NotificationLayout.BigPicture,
+      payload: {'notificationId': '1234567890'},
+    );
+    final actionButtons = [
+      NotificationActionButton(key: 'REDIRECT', label: 'Redirect'),
+      NotificationActionButton(
+          key: 'REPLY',
+          label: 'Reply Message',
+          requireInputText: true,
+          actionType: ActionType.SilentAction),
+      NotificationActionButton(
+          key: 'DISMISS',
+          label: 'Dismiss',
+          actionType: ActionType.DismissAction,
+          isDangerousOption: true)
+    ];
 
-    await AwesomeNotifications().createNotification(
-        content: NotificationContent(
-            id: -1, // -1 is replaced by a random number
-            channelKey: 'alerts',
-            title: 'Huston! The eagle has landed!',
-            body:
-                "A small step for a man, but a giant leap to Flutter's community!",
-            bigPicture: 'https://storage.googleapis.com/cms-storage-bucket/d406c736e7c4c57f5f61.png',
-            largeIcon: 'https://storage.googleapis.com/cms-storage-bucket/0dbfcc7a59cd1cf16282.png',
-            //'asset://assets/images/balloons-in-sky.jpg',
-            notificationLayout: NotificationLayout.BigPicture,
-            payload: {'notificationId': '1234567890'}),
-        actionButtons: [
-          NotificationActionButton(key: 'REDIRECT', label: 'Redirect'),
-          NotificationActionButton(
-              key: 'REPLY',
-              label: 'Reply Message',
-              requireInputText: true,
-              actionType: ActionType.SilentAction),
-          NotificationActionButton(
-              key: 'DISMISS',
-              label: 'Dismiss',
-              actionType: ActionType.DismissAction,
-              isDangerousOption: true)
-        ]);
+    await _showNotification(
+      notificationContent: notificationContent,
+      actionButtons: actionButtons,
+    );
   }
 
   static Future<void> scheduleNewNotification() async {
@@ -315,30 +361,38 @@ class NotificationController {
     if (!isAllowed) isAllowed = await displayNotificationRationale();
     if (!isAllowed) return;
 
-    await AwesomeNotifications().createNotification(
-        content: NotificationContent(
-            id: -1, // -1 is replaced by a random number
-            channelKey: 'alerts',
-            title: "Huston! The eagle has landed!",
-            body:
-                "A small step for a man, but a giant leap to Flutter's community!",
-            bigPicture: 'https://storage.googleapis.com/cms-storage-bucket/d406c736e7c4c57f5f61.png',
-            largeIcon: 'https://storage.googleapis.com/cms-storage-bucket/0dbfcc7a59cd1cf16282.png',
-            //'asset://assets/images/balloons-in-sky.jpg',
-            notificationLayout: NotificationLayout.BigPicture,
-            payload: {
-              'notificationId': '1234567890'
-            }),
-        actionButtons: [
-          NotificationActionButton(key: 'REDIRECT', label: 'Redirect'),
-          NotificationActionButton(
-              key: 'DISMISS',
-              label: 'Dismiss',
-              actionType: ActionType.DismissAction,
-              isDangerousOption: true)
-        ],
-        schedule: NotificationCalendar.fromDate(
-            date: DateTime.now().add(const Duration(seconds: 10))));
+    final notificationContent = NotificationContent(
+      id: -1, // -1 is replaced by a random number
+      channelKey: 'alerts',
+      title: "Huston! The eagle has landed!",
+      body: "A small step for a man, but a giant leap to Flutter's community!",
+      bigPicture:
+          'https://storage.googleapis.com/cms-storage-bucket/d406c736e7c4c57f5f61.png',
+      largeIcon:
+          'https://storage.googleapis.com/cms-storage-bucket/0dbfcc7a59cd1cf16282.png',
+      //'asset://assets/images/balloons-in-sky.jpg',
+      notificationLayout: NotificationLayout.BigPicture,
+      payload: {'notificationId': '1234567890'},
+    );
+
+    final actionButtons = [
+      NotificationActionButton(key: 'REDIRECT', label: 'Redirect'),
+      NotificationActionButton(
+        key: 'DISMISS',
+        label: 'Dismiss',
+        actionType: ActionType.DismissAction,
+        isDangerousOption: true,
+      )
+    ];
+
+    final schedule = NotificationCalendar.fromDate(
+        date: DateTime.now().add(const Duration(seconds: 10)));
+
+    await _showNotification(
+      notificationContent: notificationContent,
+      actionButtons: actionButtons,
+      schedule: schedule,
+    );
   }
 
   static Future<void> resetBadgeCounter() async {
